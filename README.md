@@ -125,13 +125,29 @@ curl -X POST http://localhost:30080/v1/chat/completions \
 
 ---
 
-## Нагрузочное тестирование и аналитика
+## Нагрузочное тестирование и аналитика (Бонус 3)
 
-### Запуск нагрузочного скрипта:
-Скрипт использует асинхронный стриминг (SSE) для вычисления точного **TTFT (Time To First Token)**, общей **Latency** и **Throughput (токенов/сек)**:
+Скрипт `benchmark/load_test.py` использует асинхронный стриминг (SSE) для вычисления точного **TTFT (Time To First Token)**, общей **Latency** и **Throughput (токенов/сек)**. Тестирование можно запускать двумя способами:
+
+### Способ 1: Внутри кластера Kubernetes (Cloud-Native Job)
+Запуск теста прямо внутри сети кластера. Запросы идут напрямую по внутреннему DNS к `http://vllm-service:8000`, не требуя открытия портов наружу:
 ```bash
-python3 -m pip install aiohttp
-python3 benchmark/load_test.py --endpoint http://localhost:30080 --api-key sk-kaspersky-de-bearer-token-2026 --concurrency 2 --requests 4
+# 1. Создать ConfigMap с кодом тестового скрипта:
+kubectl create configmap benchmark-script --from-file=load_test.py=benchmark/load_test.py --dry-run=client -o yaml | kubectl apply -f -
+
+# 2. Запустить Kubernetes Job:
+kubectl apply -f k8s/base/benchmark-job.yaml
+
+# 3. Смотреть вывод и итоговую таблицу метрик в логах Job:
+kubectl logs -l app=vllm-load-test -f
+```
+
+### Способ 2: С локального хоста (Client Mode)
+Запуск теста со своего ноутбука через открытый `port-forward` или `NodePort :30080`:
+```bash
+# В первой вкладке: kubectl port-forward svc/vllm-service 8000:8000
+# Во второй вкладке:
+uv run --with aiohttp python3 benchmark/load_test.py --endpoint http://localhost:8000 --api-key sk-kaspersky-de-bearer-token-2026 --concurrency 2 --requests 2
 ```
 
 ### Итоговая таблица эмпирических замеров (CPU Inference, Apple Silicon Docker Desktop VM):

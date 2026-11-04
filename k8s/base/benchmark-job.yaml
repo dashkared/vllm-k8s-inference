@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vllm-load-test
+  labels:
+    app: vllm-load-test
+spec:
+  # Automatically clean up finished job pod after 10 minutes
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: vllm-load-test
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: load-tester
+          image: python:3.11-slim
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "[LoadTest] Installing aiohttp client..."
+              pip install --no-cache-dir aiohttp
+              echo "[LoadTest] Running load testing suite inside Kubernetes cluster against http://vllm-service:8000..."
+              python3 /benchmark/load_test.py \
+                --endpoint http://vllm-service:8000 \
+                --api-key "$API_KEY" \
+                --model Qwen2.5-1.5B-Instruct \
+                --concurrency 2 \
+                --requests 2 \
+                --max-tokens 30
+          env:
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vllm-secrets
+                  key: api-key
+          volumeMounts:
+            - name: script-volume
+              mountPath: /benchmark
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+      volumes:
+        - name: script-volume
+          configMap:
+            name: benchmark-script
