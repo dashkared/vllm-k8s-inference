@@ -142,6 +142,40 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   }'
 ```
 
+### 3. Проверка защиты приватности и аудита (Privacy Filter)
+По требованиям ИБ (GDPR, 152-ФЗ) тексты пользовательских промптов и генераций не должны попадать в stdout/stderr контейнера, сохраняя при этом аудитные метаданные (timestamp, IP, endpoint, статус 200, tokens/sec).
+
+* **Проверка логов боевого инференса:**
+  Проверьте логи пода после выполнения запроса:
+  ```bash
+  kubectl logs -l app=vllm-inference -c vllm-server --tail=15
+  ```
+  *Результат:* В логах фиксируется только факт доступа (`POST /v1/chat/completions 200`) и метрики производительности (`Avg prompt throughput: X tokens/s`), а текст промпта и ответа **полностью скрыт**.
+
+* **Тест маскирования модуля `PrivacyLogFilter`:**
+  Выполните моментальный тест фильтрации прямо внутри контейнера:
+  ```bash
+  kubectl exec -it deployment/vllm-inference -c vllm-server -- python3 -c '
+  import logging
+  from privacy_filter import PrivacyLogFilter
+
+  logger = logging.getLogger("audit")
+  handler = logging.StreamHandler()
+  handler.addFilter(PrivacyLogFilter())
+  handler.setFormatter(logging.Formatter("[AUDIT_LOG] %(message)s"))
+  logger.addHandler(handler)
+  logger.setLevel(logging.INFO)
+
+  logger.info("Request: {\"prompt\": \"SECRET_CARD_1234\", \"max_tokens\": 20}")
+  logger.info("Response: {\"content\": \"CONFIDENTIAL_ANSWER_DATA\"}")
+  '
+  ```
+  *Результат работы фильтра:*
+  ```text
+  [AUDIT_LOG] Request: {"prompt": "[REDACTED_PROMPT]", "max_tokens": 20}
+  [AUDIT_LOG] Response: {"content": "[REDACTED_CONTENT]"}
+  ```
+
 ---
 
 ## Нагрузочное тестирование и аналитика (Бонус 3)
