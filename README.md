@@ -60,11 +60,17 @@
 
 ## Быстрый старт
 
-### 1. Предварительные требования
+### 1. Клонирование репозитория
+```bash
+git clone https://github.com/dashkared/vllm-k8s-inference.git
+cd vllm-k8s-inference
+```
+
+### 2. Предварительные требования
 * Установленный **Docker Desktop** (с включенным Kubernetes: `Settings -> Kubernetes -> Enable Kubernetes`).
 * Утилита **kubectl** (встроенная в Docker Desktop).
 
-### 2. Сборка Docker-образов
+### 3. Сборка Docker-образов
 Соберите основной образ инференса и легковесный initContainer локально:
 ```bash
 # 1. Легковесный Rootless initContainer для скачивания весов
@@ -74,7 +80,7 @@ docker build -t vllm-model-downloader:latest -f docker/Dockerfile.init docker/
 docker build -t vllm-inference:latest -f docker/Dockerfile docker/
 ```
 
-### 3. Развертывание в Kubernetes через Kustomize (Бонус 1)
+### 4. Развертывание в Kubernetes через Kustomize (Бонус 1)
 ```bash
 kubectl apply -k k8s/base
 ```
