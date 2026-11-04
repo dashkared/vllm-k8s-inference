@@ -9,6 +9,9 @@ HOST="${HOST:-0.0.0.0}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-2048}"
 BLOCK_SIZE="${BLOCK_SIZE:-16}"
 
+# CPU Optimization: Limit OpenMP threads so k8s control-plane & system remain responsive
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
+
 # Base vLLM arguments
 ARGS=(
     serve
@@ -16,9 +19,9 @@ ARGS=(
     --served-model-name "$SERVED_MODEL_NAME"
     --host "$HOST"
     --port "$PORT"
-    --device cpu
     --max-model-len "$MAX_MODEL_LEN"
     --block-size "$BLOCK_SIZE"
+    --enforce-eager
     --logging-config '{"pylogging_config_file": "/app/logging_config.json"}'
     --disable-log-outputs
 )
@@ -27,6 +30,12 @@ ARGS=(
 if [ -n "$API_KEY" ]; then
     echo "[Entrypoint] Bearer authentication enabled (API key configured)."
     ARGS+=(--api-key "$API_KEY")
+fi
+
+# KV Cache memory limit if specified
+if [ -n "$KV_CACHE_MEMORY_BYTES" ]; then
+    echo "[Entrypoint] Enforcing KV Cache memory bytes: $KV_CACHE_MEMORY_BYTES"
+    ARGS+=(--kv-cache-memory-bytes "$KV_CACHE_MEMORY_BYTES")
 fi
 
 # Append any additional flags passed to container

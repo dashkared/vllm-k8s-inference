@@ -37,23 +37,29 @@ class PrivacyLogFilter(logging.Filter):
                     msg = pattern.sub(replacement, msg)
                 record.msg = msg
 
-            # 2. Redact arguments if present
+            # 2. Redact arguments while strictly preserving structure and arity
             if record.args:
-                new_args = []
-                for arg in record.args:
-                    if isinstance(arg, str):
-                        for pattern, replacement in SENSITIVE_PATTERNS:
-                            arg = pattern.sub(replacement, arg)
-                        new_args.append(arg)
-                    elif isinstance(arg, dict):
-                        new_args.append(self._sanitize_dict(arg))
-                    else:
-                        new_args.append(arg)
-                record.args = tuple(new_args)
+                if isinstance(record.args, tuple):
+                    record.args = tuple(self._sanitize_val(a) for a in record.args)
+                elif isinstance(record.args, dict):
+                    record.args = self._sanitize_dict(record.args)
         except Exception:
             # Under no circumstances should a logging filter crash the inference server
             pass
         return True
+
+    def _sanitize_val(self, val: Any) -> Any:
+        if isinstance(val, str):
+            for pattern, replacement in SENSITIVE_PATTERNS:
+                val = pattern.sub(replacement, val)
+            return val
+        elif isinstance(val, dict):
+            return self._sanitize_dict(val)
+        elif isinstance(val, list):
+            return [self._sanitize_val(i) for i in val]
+        elif isinstance(val, tuple):
+            return tuple(self._sanitize_val(i) for i in val)
+        return val
 
     def _sanitize_dict(self, d: dict[str, Any]) -> dict[str, Any]:
         sanitized = {}
@@ -62,8 +68,8 @@ class PrivacyLogFilter(logging.Filter):
                 sanitized[k] = "[REDACTED]"
             elif isinstance(v, dict):
                 sanitized[k] = self._sanitize_dict(v)
-            elif isinstance(v, list):
-                sanitized[k] = [self._sanitize_dict(i) if isinstance(i, dict) else i for i in v]
+            elif isinstance(v, (list, tuple)):
+                sanitized[k] = [self._sanitize_val(i) for i in v]
             else:
                 sanitized[k] = v
         return sanitized

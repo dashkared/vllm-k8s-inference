@@ -22,4 +22,10 @@ data:
   
   # Engine parameters optimized for CPU execution
   MAX_MODEL_LEN: "2048"
-  BLOCK_SIZE: "16"
+  BLOCK_SIZE: "32"
+  
+  # KV-Cache allocation for CPU
+  KV_CACHE_MEMORY_BYTES: "512M"
+  
+  # Disable V1 multiprocessing to keep single-process footprint on CPU (halves RAM usage)
+  VLLM_ENABLE_V1_MULTIPROCESSING: "0"
