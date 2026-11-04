@@ -51,7 +51,7 @@ spec:
       # Main inference container running vLLM Engine on CPU
       containers:
         - name: vllm-server
-          image: vllm-inference:v1.0.4
+          image: vllm-inference:latest
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:

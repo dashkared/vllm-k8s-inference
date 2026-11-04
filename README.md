@@ -8,8 +8,6 @@
 
 ## Архитектура решения
 
-Архитектура системы построена по модульному принципу в соответствии с практиками Kubernetes и корпоративными стандартами информационной безопасности («Лаборатория Касперского»):
-
 ### 1. Двухэтапная модель жизненного цикла пода (Pod Lifecycle)
 * **Фаза инициализации (`initContainer: model-downloader`):**
   * Запускается в легковесном изолированном образе (~200 МБ на базе `python:3.11-slim`) от непривилегированного пользователя `UID 10001`.
@@ -89,6 +87,10 @@ kubectl get pods,pvc,svc -l app=vllm-inference
 *При первом старте:* под перейдет в статус `Init:0/1` (initContainer скачивает веса модели ~3 ГБ на PVC).  
 *После скачивания:* под автоматически перейдет в статус `Running 1/1` (основной контейнер загрузит веса в RAM и начнет отдавать трафик).
 
+> [!NOTE]
+> **О модели и Hugging Face Token:**
+> Выбранная модель `Qwen/Qwen2.5-1.5B-Instruct` является открытой (public), поэтому для её скачивания токен Hugging Face не требуется — загрузчик скачивает веса автоматически при первом старте. Если вы захотите протестировать gated/приватную модель (например, Meta-Llama-3), укажите ваш токен в файле `k8s/base/secret.yaml` в поле `hf-token`.
+
 Логи скачивания модели:
 ```bash
 kubectl logs -l app=vllm-inference -c model-downloader -f
@@ -101,19 +103,23 @@ kubectl logs -l app=vllm-inference -c vllm-server -f
 
 ---
 
-## 🔒 Проверка безопасности и API Bearer Token
+## Проверка безопасности и API Bearer Token
 
-Эндпоинт доступен снаружи кластера через NodePort на `http://localhost:30080` (или через `kubectl port-forward svc/vllm-service 8000:8000`).
+Для отправки запросов к API откройте прямое защищенное соединение с сервисом в фоновой вкладке терминала:
+```bash
+kubectl port-forward svc/vllm-service 8000:8000
+```
+*(Примечание: на серверах под Linux сервис также доступен напрямую через NodePort по адресу `http://localhost:30080`).*
 
 ### 1. Запрос БЕЗ токена (Ожидается отказ 401 Unauthorized):
 ```bash
-curl -i http://localhost:30080/v1/models
+curl -i http://localhost:8000/v1/models
 ```
-*Ответ:* `HTTP/1.1 401 Unauthorized` ({"detail": "Not authenticated"}).
+*Ответ:* `HTTP/1.1 401 Unauthorized` (`{"error":"Unauthorized"}`).
 
 ### 2. Запрос С валидным Bearer Token (Успех 200 OK):
 ```bash
-curl -X POST http://localhost:30080/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-kaspersky-de-bearer-token-2026" \
   -d '{
@@ -129,25 +135,25 @@ curl -X POST http://localhost:30080/v1/chat/completions \
 
 Скрипт `benchmark/load_test.py` использует асинхронный стриминг (SSE) для вычисления точного **TTFT (Time To First Token)**, общей **Latency** и **Throughput (токенов/сек)**. Тестирование можно запускать двумя способами:
 
-### Способ 1: Внутри кластера Kubernetes (Cloud-Native Job)
-Запуск теста прямо внутри сети кластера. Запросы идут напрямую по внутреннему DNS к `http://vllm-service:8000`, не требуя открытия портов наружу:
+### Способ 1: Внутри кластера Kubernetes (Рекомендуемый, Cloud-Native Job)
+Запуск теста прямо внутри кластера. Манифест автоматически развернет ConfigMap со скриптом и Kubernetes Job, который обратится напрямую к `http://vllm-service:8000` без необходимости проброса портов или установки сторонних библиотек на хост:
 ```bash
-# 1. Создать ConfigMap с кодом тестового скрипта:
-kubectl create configmap benchmark-script --from-file=load_test.py=benchmark/load_test.py --dry-run=client -o yaml | kubectl apply -f -
-
-# 2. Запустить Kubernetes Job:
+# 1. Запустить Job внутри кластера:
 kubectl apply -f k8s/base/benchmark-job.yaml
 
-# 3. Смотреть вывод и итоговую таблицу метрик в логах Job:
+# 2. Смотреть ход тестирования и итоговую таблицу метрик:
 kubectl logs -l app=vllm-load-test -f
 ```
 
 ### Способ 2: С локального хоста (Client Mode)
-Запуск теста со своего ноутбука через открытый `port-forward` или `NodePort :30080`:
+Запуск скрипта тестирования со своего компьютера (требуется активный `kubectl port-forward svc/vllm-service 8000:8000`):
 ```bash
-# В первой вкладке: kubectl port-forward svc/vllm-service 8000:8000
-# Во второй вкладке:
+# Вариант А: через uv (быстро и изолированно, без загрязнения Python):
 uv run --with aiohttp python3 benchmark/load_test.py --endpoint http://localhost:8000 --api-key sk-kaspersky-de-bearer-token-2026 --concurrency 2 --requests 2
+
+# Вариант Б: через стандартный venv:
+python3 -m venv .venv && source .venv/bin/activate && pip install aiohttp
+python3 benchmark/load_test.py --endpoint http://localhost:8000 --api-key sk-kaspersky-de-bearer-token-2026 --concurrency 2 --requests 2
 ```
 
 ### Итоговая таблица эмпирических замеров (CPU Inference, Apple Silicon Docker Desktop VM):
