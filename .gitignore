@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Model weights cache (never commit weights to git!)
+/data/
+*.safetensors
+*.bin
+
+# macOS
+.DS_Store

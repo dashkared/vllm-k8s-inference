@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: vllm-k8s-base
+
+resources:
+  - pvc.yaml
+  - secret.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+
+labels:
+  - pairs:
+      project: kaspersky-ml-research
+      managed-by: kustomize

@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-config
+  labels:
+    app: vllm-inference
+data:
+  # Hugging Face Repository identifier
+  MODEL_ID: "Qwen/Qwen2.5-1.5B-Instruct"
+  
+  # Local storage path on the mounted PVC volume
+  CACHE_DIR: "/data/models"
+  MODEL_DIR: "/data/models/Qwen--Qwen2.5-1.5B-Instruct"
+  MODEL_PATH: "/data/models/Qwen--Qwen2.5-1.5B-Instruct"
+  
+  # Name presented in the OpenAI API (/v1/models)
+  SERVED_MODEL_NAME: "Qwen2.5-1.5B-Instruct"
+  
+  # Network and Server Configuration
+  PORT: "8000"
+  HOST: "0.0.0.0"
+  
+  # Engine parameters optimized for CPU execution
+  MAX_MODEL_LEN: "2048"
+  BLOCK_SIZE: "16"

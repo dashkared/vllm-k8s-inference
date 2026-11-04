@@ -1,0 +1,29 @@
+# Multi-stage / lightweight Rootless image for initContainer model downloader
+FROM python:3.11-slim
+
+LABEL maintainer="Dmitriy Shkarednyy"
+LABEL description="Lightweight rootless model downloader initContainer for vLLM"
+
+# Install curl/ca-certificates if needed and create non-root user
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g 10001 appuser \
+    && useradd -u 10001 -g appuser -m -s /bin/bash appuser
+
+WORKDIR /app
+
+# Copy pinned requirements and install
+COPY requirements-init.txt /app/requirements-init.txt
+RUN pip install --no-cache-dir -r /app/requirements-init.txt
+
+# Copy download script
+COPY download_model.py /app/download_model.py
+
+# Create mount point directory and give ownership to non-root user
+RUN mkdir -p /data && chown -R 10001:10001 /data /app
+
+# Switch to non-root user (Rootless)
+USER 10001
+
+ENTRYPOINT ["python3", "/app/download_model.py"]
