@@ -82,33 +82,43 @@ docker build -t vllm-inference:latest -f docker/Dockerfile docker/
 kubectl apply -k k8s/base
 ```
 
-Проверьте статус развертывания:
+Отслеживайте статус развертывания:
 ```bash
 kubectl get pods,pvc,svc -l app=vllm-inference
 ```
 
-*При первом старте:* под перейдет в статус `Init:0/1` (initContainer скачивает веса модели ~3 ГБ на PVC).  
-*После скачивания:* под автоматически перейдет в статус `Running 1/1` (основной контейнер загрузит веса в RAM и начнет отдавать трафик).
+#### Жизненный цикл запуска пода (важно для проверяющего!):
+1. **Фаза 1: `Init:0/1` (~2–5 мин при первом старте, ~1 сек при повторных)**  
+   Работает легковесный `initContainer` (`model-downloader`). Он скачивает веса модели `Qwen/Qwen2.5-1.5B-Instruct` (~3 ГБ) с Hugging Face на постоянный том `vllm-model-pvc` (`[CACHE MISS]`). При любых повторных перезапусках срабатывает `[CACHE HIT]`, и этот шаг завершается мгновенно.  
+   *Логи скачивания весов:*
+   ```bash
+   kubectl logs -l app=vllm-inference -c model-downloader -f
+   ```
+
+2. **Фаза 2: `0/1 Running` или `PodInitializing` (~30–45 секунд)**  
+   После завершения скачивания Kubernetes запускает основной контейнер `vllm-server`. Движок vLLM считывает 3 ГБ весов из диска PVC в оперативную память CPU, инициализирует KV-кэш и прогревает модель. **В этот период внутренний порт 8000 ещё закрыт и модель готовится к работе!**  
+   *Логи инициализации сервера:*
+   ```bash
+   kubectl logs -l app=vllm-inference -c vllm-server -f
+   ```
+
+3. **Фаза 3: `1/1 Running` (Сервер полностью готов к инференсу)**  
+   Сервер Uvicorn успешно стартовал (`Application startup complete`), Readiness Probe возвращает `200 OK`. Теперь под готов принимать запросы!
+
+> [!IMPORTANT]
+> **Не запускайте `port-forward` и запросы до перехода в статус `1/1 Running`!**  
+> Если попытаться выполнить `kubectl port-forward` или отправить `curl`, пока статус пода остаётся `0/1 Running` (модель ещё загружается в RAM), ОС выдаст ошибку `connect: connection refused` либо `Empty reply from server`.  
+> Переходите к шагу с `port-forward` только тогда, когда команда `kubectl get pods -l app=vllm-inference` выведет в колонке `READY` значение **`1/1`**.
 
 > [!NOTE]
 > **О модели и Hugging Face Token:**
 > Выбранная модель `Qwen/Qwen2.5-1.5B-Instruct` является открытой (public), поэтому для её скачивания токен Hugging Face не требуется — загрузчик скачивает веса автоматически при первом старте. Если вы захотите протестировать gated/приватную модель (например, Meta-Llama-3), укажите ваш токен в файле `k8s/base/secret.yaml` в поле `hf-token`.
 
-Логи скачивания модели:
-```bash
-kubectl logs -l app=vllm-inference -c model-downloader -f
-```
-
-Логи сервера vLLM:
-```bash
-kubectl logs -l app=vllm-inference -c vllm-server -f
-```
-
 ---
 
 ## Проверка безопасности и API Bearer Token
 
-Для отправки запросов к API откройте прямое защищенное соединение с сервисом в фоновой вкладке терминала:
+После того как под перешел в статус **`1/1 Running`**, откройте соединение с сервисом в отдельной вкладке терминала:
 ```bash
 kubectl port-forward svc/vllm-service 8000:8000
 ```
