@@ -8,39 +8,37 @@
 
 ## Архитектура решения
 
-```mermaid
-flowchart TD
-    subgraph K8s["Kubernetes Cluster (Docker Desktop / kind / Minikube)"]
-        direction TB
+Архитектура системы построена по модульному принципу в соответствии с практиками Kubernetes и корпоративными стандартами информационной безопасности («Лаборатория Касперского»):
 
-        subgraph IngressLayer["Сетевой уровень"]
-            Svc["Service: vllm-service (NodePort :30080 / ClusterIP :8000)"]
-        end
+### 1. Двухэтапная модель жизненного цикла пода (Pod Lifecycle)
+* **Фаза инициализации (`initContainer: model-downloader`):**
+  * Запускается в легковесном изолированном образе (~200 МБ на базе `python:3.11-slim`) от непривилегированного пользователя `UID 10001`.
+  * Монтирует общий том постоянного хранилища `/data` из `PersistentVolumeClaim` (10Gi).
+  * Выполняет скрипт `download_model.py`: проверяет целостность локальных снапшотов модели `Qwen/Qwen2.5-1.5B-Instruct`.
+  * При «теплом» старте обнаруживает кэш (`[CACHE HIT]`), пропуская обращение к внешним сетям и завершаясь за секунду.
+  * При «холодном» старте (`[CACHE MISS]`) скачивает веса из Hugging Face Hub (при необходимости передавая `HF_TOKEN` из Kubernetes Secret).
+  * Завершается со статусом `Completed` и полностью освобождает вычислительные ресурсы ноды перед стартом инференса.
+* **Фаза инференса (`Main Container: vllm-server`):**
+  * Стартует только после успешного завершения `initContainer`.
+  * Запускает высокопроизводительный движок vLLM v0.33.0 в режиме CPU-инференса от `UID 10001`.
+  * Загружает веса модели локально из смонтированного каталога `/data/models/...` в оперативную память.
+  * Аллоцирует KV-кэш через алгоритм PagedAttention с фиксированным лимитом `KV_CACHE_MEMORY_BYTES: 512M` (достаточно для ~18 700 токенов контекста).
+  * Монтирует выделенный `emptyDir` (1Gi в RAM) в `/dev/shm` для разделяемой памяти и межпроцессного обмена.
+  * Активирует кастомный фильтр логирования `PrivacyLogFilter`, маскирующий конфиденциальные данные пользователей (`[FILTERED]`).
 
-        subgraph Pod["Pod: vllm-inference (UID 10001, GID 10001, fsGroup 10001)"]
-            direction LR
-            InitC["initContainer: model-downloader\n(Легковесный образ, Python 3.11-slim)\nПроверка кэша и загрузка весов"]
-            MainC["Main Container: vllm-server\n(vLLM 0.33.0 CPU Engine)\nИнференс + Privacy Logging Filter"]
-            InitC -->|1. Завершается [Completed]| MainC
-        end
+### 2. Сетевой уровень и авторизация (Networking & Security)
+* **Сервис `vllm-service`:**
+  * Предоставляет стабильную точку входа `ClusterIP: 8000` внутри кластера и `NodePort: 30080` для внешнего доступа.
+  * Перенаправляет трафик на порт 8000 пода инференса с проверкой состояния через Liveness, Readiness и Startup Probes (`/health`).
+* **Защита эндпоинтов (Bearer Authentication):**
+  * Все API-методы (`/v1/chat/completions`, `/v1/models`) защищены статическим токеном.
+  * При неавторизованном запросе сервер немедленно возвращает `HTTP 401 Unauthorized`.
 
-        subgraph StorageLayer["Слой хранения и конфигурации"]
-            PVC["PVC: vllm-model-pvc (10Gi)\nЛокальный кэш весов"]
-            CM["ConfigMap: vllm-config\nПараметры инференса (CPU, batch, port)"]
-            Sec["Secret: vllm-secrets\nHF_TOKEN (закрытые модели)\nAPI_KEY (Bearer token)"]
-        end
-
-        Svc --> MainC
-        PVC ===|/data| InitC
-        PVC ===|/data| MainC
-        CM -.-> InitC
-        CM -.-> MainC
-        Sec -.->|HF_TOKEN| InitC
-        Sec -.->|API_KEY| MainC
-    end
-
-    Client["Клиент / Load Test Script (Bearer Auth)"] -->|HTTP POST :30080| Svc
-```
+### 3. Хранение и декларативная конфигурация
+* **`PersistentVolumeClaim: vllm-model-pvc` (10Gi, `ReadWriteOnce`):** сохраняет скачанные веса модели между рестартами подов, исключая повторную нагрузку на сеть.
+* **`ConfigMap: vllm-config`:** централизованно хранит параметры инференса (`MAX_MODEL_LEN: 2048`, `BLOCK_SIZE: 32`, `KV_CACHE_MEMORY_BYTES: 512M`, `VLLM_ENABLE_V1_MULTIPROCESSING: 0`).
+* **`Secret: vllm-secrets`:** безопасно хранит `hf-token` и `api-key`.
+* **Kustomize (`kustomization.yaml`):** объединяет все манифесты, позволяя развертывать приложение одной командой `kubectl apply -k k8s/base`.
 
 ---
 
