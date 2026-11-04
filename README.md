@@ -71,12 +71,9 @@ cd vllm-k8s-inference
 * Утилита **kubectl** (встроенная в Docker Desktop).
 
 ### 3. Сборка Docker-образов
-Соберите основной образ инференса и легковесный initContainer локально:
+Соберите легковесный initContainer и основной образ vLLM инференса:
 ```bash
-# 1. Легковесный Rootless initContainer для скачивания весов
 docker build -t vllm-model-downloader:latest -f docker/Dockerfile.init docker/
-
-# 2. Основной Rootless образ vLLM CPU инференса
 docker build -t vllm-inference:latest -f docker/Dockerfile docker/
 ```
 

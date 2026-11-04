@@ -7,7 +7,7 @@ SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-Qwen2.5-1.5B-Instruct}"
 PORT="${PORT:-8000}"
 HOST="${HOST:-0.0.0.0}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-2048}"
-BLOCK_SIZE="${BLOCK_SIZE:-16}"
+BLOCK_SIZE="${BLOCK_SIZE:-32}"
 
 # CPU Optimization: Limit OpenMP threads so k8s control-plane & system remain responsive
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
